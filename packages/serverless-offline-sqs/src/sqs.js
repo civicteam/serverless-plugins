@@ -9,8 +9,9 @@ const {
   matches,
   pipe,
   toString,
-  values
+  values,
 } = require('lodash/fp');
+const { uniqBy } = require('lodash');
 const log = require('@serverless/utils/log').log;
 const {default: PQueue} = require('p-queue');
 const SQSEventDefinition = require('./sqs-event-definition');
@@ -82,7 +83,7 @@ class SQS {
   }
 
   async _sqsEvent(functionKey, sqsEvent) {
-    const {enabled, arn, queueName, batchSize = 10} = sqsEvent;
+    const {enabled, arn, queueName, batchSize = 10, functionResponseType} = sqsEvent;
 
     if (!enabled) return;
 
@@ -109,6 +110,18 @@ class SQS {
       return getMessages(size - Messages.length, [...messages, ...Messages]);
     };
 
+    const getSuccessfullyProcessedMessages = (messages, result) => {
+      if (functionResponseType !== 'ReportBatchItemFailures') {
+        return messages;
+      }
+
+      const failedMessageIds = new Set(
+        result?.batchItemFailures?.map(message => message?.itemIdentifier) ?? []
+      );
+
+      return messages.filter(({MessageId}) => !failedMessageIds.has(MessageId));
+    };
+
     const job = async () => {
       const messages = await getMessages(batchSize);
 
@@ -119,12 +132,16 @@ class SQS {
           const event = new SQSEvent(messages, this.region, arn);
           lambdaFunction.setEvent(event);
 
-          await lambdaFunction.runHandler();
+          const result = await lambdaFunction.runHandler();
+          const messagesToDelete = uniqBy(
+            getSuccessfullyProcessedMessages(messages, result),
+            msg => msg.MessageId
+          );
 
           await Promise.all(
             chunk(
               10,
-              (messages || []).map(({MessageId: Id, ReceiptHandle}) => ({
+              (messagesToDelete || []).map(({MessageId: Id, ReceiptHandle}) => ({
                 Id,
                 ReceiptHandle
               }))
