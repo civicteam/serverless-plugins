@@ -11,11 +11,12 @@ const {
   toString,
   values,
 } = require('lodash/fp');
-const { uniqBy } = require('lodash');
 const log = require('@serverless/utils/log').log;
 const {default: PQueue} = require('p-queue');
 const SQSEventDefinition = require('./sqs-event-definition');
 const SQSEvent = require('./sqs-event');
+const { v4 } = require('uuid');
+const uuid = v4;
 
 const delay = timeout =>
   new Promise(resolve => {
@@ -133,16 +134,13 @@ class SQS {
           lambdaFunction.setEvent(event);
 
           const result = await lambdaFunction.runHandler();
-          const messagesToDelete = uniqBy(
-            getSuccessfullyProcessedMessages(messages, result),
-            msg => msg.MessageId
-          );
+          const messagesToDelete = getSuccessfullyProcessedMessages(messages, result);
 
           await Promise.all(
             chunk(
               10,
-              (messagesToDelete || []).map(({MessageId: Id, ReceiptHandle}) => ({
-                Id,
+              (messagesToDelete || []).map(({ReceiptHandle}) => ({
+                Id: uuid(), // This ID is just used to correlate the delete results to the entries we sent. It should not be the message ID.
                 ReceiptHandle
               }))
             ).map(Entries =>

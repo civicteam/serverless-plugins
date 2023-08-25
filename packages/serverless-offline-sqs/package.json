@@ -1,6 +1,6 @@
 {
   "name": "@civic/serverless-offline-sqs",
-  "version": "7.3.2-civic-fixes",
+  "version": "7.3.2-civic-fixes-v3",
   "description": "Emulate AWS λ and SQS locally when developing your Serverless project",
   "main": "src",
   "repository": {
@@ -32,7 +32,8 @@
   "dependencies": {
     "aws-sdk": "^2.1234.0",
     "lodash": "^4.17.21",
-    "p-queue": "^6.6.2"
+    "p-queue": "^6.6.2",
+    "uuid": "^9.0.0"
   },
   "devDependencies": {
     "serverless-offline": "^12"
