@@ -9,12 +9,14 @@ const {
   matches,
   pipe,
   toString,
-  values
+  values,
 } = require('lodash/fp');
 const log = require('@serverless/utils/log').log;
 const {default: PQueue} = require('p-queue');
 const SQSEventDefinition = require('./sqs-event-definition');
 const SQSEvent = require('./sqs-event');
+const { v4 } = require('uuid');
+const uuid = v4;
 
 const delay = timeout =>
   new Promise(resolve => {
@@ -82,7 +84,7 @@ class SQS {
   }
 
   async _sqsEvent(functionKey, sqsEvent) {
-    const {enabled, arn, queueName, batchSize = 10} = sqsEvent;
+    const {enabled, arn, queueName, batchSize = 10, functionResponseType} = sqsEvent;
 
     if (!enabled) return;
 
@@ -109,6 +111,18 @@ class SQS {
       return getMessages(size - Messages.length, [...messages, ...Messages]);
     };
 
+    const getSuccessfullyProcessedMessages = (messages, result) => {
+      if (functionResponseType !== 'ReportBatchItemFailures') {
+        return messages;
+      }
+
+      const failedMessageIds = new Set(
+        result?.batchItemFailures?.map(message => message?.itemIdentifier) ?? []
+      );
+
+      return messages.filter(({MessageId}) => !failedMessageIds.has(MessageId));
+    };
+
     const job = async () => {
       const messages = await getMessages(batchSize);
 
@@ -119,13 +133,14 @@ class SQS {
           const event = new SQSEvent(messages, this.region, arn);
           lambdaFunction.setEvent(event);
 
-          await lambdaFunction.runHandler();
+          const result = await lambdaFunction.runHandler();
+          const messagesToDelete = getSuccessfullyProcessedMessages(messages, result);
 
           await Promise.all(
             chunk(
               10,
-              (messages || []).map(({MessageId: Id, ReceiptHandle}) => ({
-                Id,
+              (messagesToDelete || []).map(({ReceiptHandle}) => ({
+                Id: uuid(), // This ID is just used to correlate the delete results to the entries we sent. It should not be the message ID.
                 ReceiptHandle
               }))
             ).map(Entries =>
